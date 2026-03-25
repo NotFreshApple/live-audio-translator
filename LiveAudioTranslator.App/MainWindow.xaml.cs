@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -11,11 +10,8 @@ namespace LiveAudioTranslator.App;
 
 public partial class MainWindow : Window
 {
-    private const string LanguageSettingsUri = "ms-settings:regionlanguage";
-
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly ISpeechRecognitionService _speechRecognitionService;
-    private readonly ISpeechRecognizerAvailabilityService _speechRecognizerAvailabilityService;
     private readonly DispatcherTimer _signalMonitorTimer;
     private readonly List<LanguageOption> _languageOptions;
     private bool _isCaptureEnabled;
@@ -29,8 +25,7 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         _audioCaptureService = new WasapiLoopbackAudioCaptureService();
-        _speechRecognitionService = new SystemSpeechRecognitionService();
-        _speechRecognizerAvailabilityService = new SystemSpeechRecognizerAvailabilityService();
+        _speechRecognitionService = new LocalWhisperSpeechRecognitionService();
         _languageOptions =
         [
             new LanguageOption { DisplayName = "영어", CultureCode = "en-US" },
@@ -59,11 +54,6 @@ public partial class MainWindow : Window
         };
         _signalMonitorTimer.Tick += SignalMonitorTimer_OnTick;
 
-        Loaded += async (_, _) =>
-        {
-            await RefreshLanguageSettingsButtonsAsync();
-        };
-
         ApplyVisualState();
     }
 
@@ -76,7 +66,7 @@ public partial class MainWindow : Window
         Top = workArea.Bottom - Height;
     }
 
-    private async void RecognitionLanguageComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void RecognitionLanguageComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (RecognitionLanguageComboBox.SelectedItem is not LanguageOption selectedLanguage)
         {
@@ -85,10 +75,9 @@ public partial class MainWindow : Window
 
         _speechRecognitionService.SetRecognitionLanguage(selectedLanguage.CultureCode);
         DetailTextBlock.Text = $"{selectedLanguage.DisplayName} 인식 언어를 선택했습니다.";
-        await RefreshLanguageSettingsButtonAsync(selectedLanguage, RecognitionLanguageSettingsButton);
     }
 
-    private async void TranslationLanguageComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void TranslationLanguageComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (TranslationLanguageComboBox.SelectedItem is not LanguageOption selectedLanguage)
         {
@@ -96,61 +85,6 @@ public partial class MainWindow : Window
         }
 
         DetailTextBlock.Text = $"{selectedLanguage.DisplayName} 번역 언어를 선택했습니다.";
-        await RefreshLanguageSettingsButtonAsync(selectedLanguage, TranslationLanguageSettingsButton);
-    }
-
-    private void RecognitionLanguageSettingsButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        OpenLanguageSettings();
-    }
-
-    private void TranslationLanguageSettingsButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        OpenLanguageSettings();
-    }
-
-    private void OpenLanguageSettings()
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = LanguageSettingsUri,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception exception)
-        {
-            MessageBox.Show(
-                this,
-                exception.Message,
-                "설정 열기 오류",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-        }
-    }
-
-    private async Task RefreshLanguageSettingsButtonsAsync()
-    {
-        if (RecognitionLanguageComboBox.SelectedItem is LanguageOption recognitionLanguage)
-        {
-            await RefreshLanguageSettingsButtonAsync(recognitionLanguage, RecognitionLanguageSettingsButton);
-        }
-
-        if (TranslationLanguageComboBox.SelectedItem is LanguageOption translationLanguage)
-        {
-            await RefreshLanguageSettingsButtonAsync(translationLanguage, TranslationLanguageSettingsButton);
-        }
-    }
-
-    private Task RefreshLanguageSettingsButtonAsync(LanguageOption selectedLanguage, Button button)
-    {
-        var ready = IsSpeechRecognitionReady(selectedLanguage.CultureCode);
-        button.Content = ready ? "사용됨" : "설정 열기";
-        button.ToolTip = ready
-            ? $"{selectedLanguage.DisplayName} 음성 인식이 사용 가능합니다."
-            : $"{selectedLanguage.DisplayName} 음성 인식을 위해 Windows 언어 및 지역 설정을 엽니다.";
-        return Task.CompletedTask;
     }
 
     private void CaptureToggleButton_OnClick(object sender, RoutedEventArgs e)
@@ -388,10 +322,5 @@ public partial class MainWindow : Window
         }
 
         return $"{value:0.##} {units[unitIndex]}";
-    }
-
-    private bool IsSpeechRecognitionReady(string cultureCode)
-    {
-        return _speechRecognizerAvailabilityService.IsRecognizerAvailable(cultureCode);
     }
 }
