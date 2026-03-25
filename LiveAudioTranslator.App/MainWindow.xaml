@@ -1,0 +1,256 @@
+<Window x:Class="LiveAudioTranslator.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:languages="clr-namespace:LiveAudioTranslator.App.Services.Languages"
+        mc:Ignorable="d"
+        Title="라이브 오디오 번역기"
+        Width="1520"
+        Height="280"
+        MinWidth="1100"
+        ResizeMode="NoResize"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="True"
+        Loaded="Window_OnLoaded"
+        Closing="Window_OnClosing">
+    <Border Margin="20,0,20,16"
+            Padding="18"
+            VerticalAlignment="Stretch"
+            CornerRadius="24"
+            Background="#B3000000"
+            BorderBrush="#33FFFFFF"
+            BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="74" />
+                    <ColumnDefinition Width="10" />
+                    <ColumnDefinition Width="130" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="74" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="CaptureToggleButton"
+                        Width="42"
+                        Height="42"
+                        Padding="0"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Click="CaptureToggleButton_OnClick"
+                        Content="●"
+                        ToolTip="오디오 캡처 켜기 또는 끄기" />
+
+                <ComboBox x:Name="RecognitionLanguageComboBox"
+                          Grid.Column="2"
+                          Height="32"
+                          VerticalAlignment="Center"
+                          DisplayMemberPath="DisplayName"
+                          SelectionChanged="RecognitionLanguageComboBox_OnSelectionChanged" />
+
+                <Button x:Name="RecognitionLanguageSettingsButton"
+                        Grid.Column="4"
+                        Height="32"
+                        Padding="10,0"
+                        Click="RecognitionLanguageSettingsButton_OnClick"
+                        Content="설정 열기" />
+
+                <ComboBox x:Name="TranslationLanguageComboBox"
+                          Grid.Column="6"
+                          Height="32"
+                          VerticalAlignment="Center"
+                          DisplayMemberPath="DisplayName"
+                          SelectionChanged="TranslationLanguageComboBox_OnSelectionChanged" />
+
+                <Button x:Name="TranslationLanguageSettingsButton"
+                        Grid.Column="8"
+                        Height="32"
+                        Padding="10,0"
+                        Click="TranslationLanguageSettingsButton_OnClick"
+                        Content="설정 열기" />
+
+                <Button x:Name="CloseButton"
+                        Grid.Column="10"
+                        Width="42"
+                        Height="42"
+                        Padding="0"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Click="CloseButton_OnClick"
+                        Content="✕"
+                        ToolTip="프로그램 종료" />
+            </Grid>
+
+            <Grid Grid.Row="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Border Padding="10,6"
+                            Margin="0,0,8,0"
+                            CornerRadius="999"
+                            Background="#191919"
+                            BorderBrush="#2A2A2A"
+                            BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="CaptureEnabledIndicator"
+                                     Width="8"
+                                     Height="8"
+                                     Margin="0,0,6,0"
+                                     VerticalAlignment="Center"
+                                     Fill="#6E6E6E" />
+                            <TextBlock Text="캡처"
+                                       Foreground="#F2F2F2"
+                                       FontSize="12"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="10,6"
+                            Margin="0,0,8,0"
+                            CornerRadius="999"
+                            Background="#191919"
+                            BorderBrush="#2A2A2A"
+                            BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="CaptureHealthIndicator"
+                                     Width="8"
+                                     Height="8"
+                                     Margin="0,0,6,0"
+                                     VerticalAlignment="Center"
+                                     Fill="#6E6E6E" />
+                            <TextBlock Text="인식"
+                                       Foreground="#F2F2F2"
+                                       FontSize="12"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Padding="10,6"
+                            CornerRadius="999"
+                            Background="#191919"
+                            BorderBrush="#2A2A2A"
+                            BorderThickness="1">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="AudioSignalIndicator"
+                                     Width="8"
+                                     Height="8"
+                                     Margin="0,0,6,0"
+                                     VerticalAlignment="Center"
+                                     Fill="#6E6E6E" />
+                            <TextBlock Text="신호"
+                                       Foreground="#F2F2F2"
+                                       FontSize="12"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <Border Grid.Row="2"
+                        Padding="20,18"
+                        CornerRadius="18"
+                        Background="#14000000"
+                        BorderBrush="#26FFFFFF"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="12" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border x:Name="OriginalPlaceholderBorder"
+                                Padding="14,10"
+                                CornerRadius="12"
+                                Background="#10000000"
+                                BorderBrush="#30FFFFFF"
+                                BorderThickness="1">
+                            <TextBlock Text="원문 표시 영역"
+                                       Foreground="#88FFFFFF"
+                                       FontSize="16"
+                                       FontWeight="SemiBold"
+                                       TextAlignment="Center" />
+                        </Border>
+
+                        <TextBlock x:Name="OriginalTextBlock"
+                                   Text="원문 텍스트가 이 줄에 표시됩니다."
+                                   Foreground="#F7F7F7"
+                                   FontSize="26"
+                                   FontWeight="SemiBold"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   VerticalAlignment="Center" />
+
+                        <Grid Grid.Row="2">
+                            <Border x:Name="TranslatedPlaceholderBorder"
+                                    Padding="14,10"
+                                    CornerRadius="12"
+                                    Background="#0D0F1A"
+                                    BorderBrush="#305E8CFF"
+                                    BorderThickness="1">
+                                <TextBlock Text="번역 자막 영역"
+                                           Foreground="#88B9D4FF"
+                                           FontSize="16"
+                                           FontWeight="SemiBold"
+                                           TextAlignment="Center" />
+                            </Border>
+
+                            <TextBlock x:Name="TranslatedTextBlock"
+                                       Text="번역 텍스트가 이 줄에 표시됩니다."
+                                       Foreground="#B9D4FF"
+                                       FontSize="24"
+                                       FontWeight="SemiBold"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="StatusTextBlock"
+                           Text="대기 중"
+                           Foreground="White"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+
+                <TextBlock x:Name="DetailTextBlock"
+                           Grid.Column="2"
+                           Text="캡처를 켜면 기본 출력 장치의 시스템 오디오를 감시합니다."
+                           Foreground="#D0D0D0"
+                           FontSize="13"
+                           TextWrapping="Wrap"
+                           VerticalAlignment="Center" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>
