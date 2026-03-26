@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -10,15 +11,23 @@ namespace LiveAudioTranslator.App;
 
 public partial class MainWindow : Window
 {
+    private const string DefaultDeviceName = "Default output device";
+    private const string DefaultFormatDescription = "No format";
+    private const string OriginalPlaceholderText = "Recognized text will appear here.";
+    private const string TranslatedPlaceholderText = "Translated text will appear here.";
+    private const string PendingTranslationText = "Recognition complete. Translation pending.";
+    private const int MaxDisplayedOriginalLines = 2;
+
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly ISpeechRecognitionService _speechRecognitionService;
     private readonly DispatcherTimer _signalMonitorTimer;
     private readonly List<LanguageOption> _languageOptions;
+    private readonly Queue<string> _recentOriginalLines = new();
     private bool _isCaptureEnabled;
     private DateTime? _lastSignalDetectedAt;
     private float _latestPeakPercent;
-    private string _currentDeviceName = "기본 출력 장치";
-    private string _currentFormatDescription = "알 수 없음";
+    private string _currentDeviceName = DefaultDeviceName;
+    private string _currentFormatDescription = DefaultFormatDescription;
 
     public MainWindow()
     {
@@ -28,10 +37,10 @@ public partial class MainWindow : Window
         _speechRecognitionService = new LocalWhisperSpeechRecognitionService();
         _languageOptions =
         [
-            new LanguageOption { DisplayName = "영어", CultureCode = "en-US" },
-            new LanguageOption { DisplayName = "일본어", CultureCode = "ja-JP" },
-            new LanguageOption { DisplayName = "중국어", CultureCode = "zh-CN" },
-            new LanguageOption { DisplayName = "한국어", CultureCode = "ko-KR" }
+            new LanguageOption { DisplayName = "English", CultureCode = "en-US" },
+            new LanguageOption { DisplayName = "Japanese", CultureCode = "ja-JP" },
+            new LanguageOption { DisplayName = "Chinese", CultureCode = "zh-CN" },
+            new LanguageOption { DisplayName = "Korean", CultureCode = "ko-KR" }
         ];
 
         RecognitionLanguageComboBox.ItemsSource = _languageOptions;
@@ -54,6 +63,7 @@ public partial class MainWindow : Window
         };
         _signalMonitorTimer.Tick += SignalMonitorTimer_OnTick;
 
+        ClearDisplayedRecognition();
         ApplyVisualState();
     }
 
@@ -74,7 +84,9 @@ public partial class MainWindow : Window
         }
 
         _speechRecognitionService.SetRecognitionLanguage(selectedLanguage.CultureCode);
-        DetailTextBlock.Text = $"{selectedLanguage.DisplayName} 인식 언어를 선택했습니다.";
+        _recentOriginalLines.Clear();
+        OriginalTextBlock.Text = OriginalPlaceholderText;
+        DetailTextBlock.Text = $"Recognition language: {selectedLanguage.DisplayName}";
     }
 
     private void TranslationLanguageComboBox_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -84,7 +96,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        DetailTextBlock.Text = $"{selectedLanguage.DisplayName} 번역 언어를 선택했습니다.";
+        DetailTextBlock.Text = $"Translation language: {selectedLanguage.DisplayName}";
     }
 
     private void CaptureToggleButton_OnClick(object sender, RoutedEventArgs e)
@@ -104,14 +116,14 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             _isCaptureEnabled = false;
-            StatusTextBlock.Text = "캡처 시작 실패";
+            StatusTextBlock.Text = "Capture start failed";
             DetailTextBlock.Text = exception.Message;
             ApplyVisualState();
 
             MessageBox.Show(
                 this,
                 exception.Message,
-                "오디오 캡처 오류",
+                "Audio capture error",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -127,10 +139,10 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             _isCaptureEnabled = e.State == AudioCaptureState.Capturing || e.State == AudioCaptureState.Starting;
-            _currentDeviceName = string.IsNullOrWhiteSpace(e.DeviceName) ? "기본 출력 장치" : e.DeviceName;
-            _currentFormatDescription = string.IsNullOrWhiteSpace(e.FormatDescription) ? "알 수 없음" : e.FormatDescription;
+            _currentDeviceName = string.IsNullOrWhiteSpace(e.DeviceName) ? DefaultDeviceName : e.DeviceName;
+            _currentFormatDescription = string.IsNullOrWhiteSpace(e.FormatDescription) ? DefaultFormatDescription : e.FormatDescription;
 
-            StatusTextBlock.Text = ConvertCaptureStateToKorean(e.State);
+            StatusTextBlock.Text = ConvertCaptureStateToDisplayText(e.State);
             DetailTextBlock.Text = BuildCaptureDetailMessage(e.State);
 
             if (e.State == AudioCaptureState.Capturing)
@@ -145,8 +157,7 @@ public partial class MainWindow : Window
                 {
                     _latestPeakPercent = 0f;
                     _lastSignalDetectedAt = null;
-                    OriginalTextBlock.Text = "원문 텍스트가 이 줄에 표시됩니다.";
-                    TranslatedTextBlock.Text = "번역 텍스트가 이 줄에 표시됩니다.";
+                    ClearDisplayedRecognition();
                 }
             }
 
@@ -180,10 +191,6 @@ public partial class MainWindow : Window
             if (e.State is SpeechRecognitionState.NoRecognizer or SpeechRecognitionState.Faulted)
             {
                 DetailTextBlock.Text = e.Message;
-                if (e.State == SpeechRecognitionState.NoRecognizer)
-                {
-                    TranslatedTextBlock.Text = "선택한 인식 언어의 음성 인식이 아직 사용 불가합니다.";
-                }
             }
 
             ApplyVisualState(_audioCaptureService.State, e.State);
@@ -194,13 +201,13 @@ public partial class MainWindow : Window
     {
         Dispatcher.Invoke(() =>
         {
-            OriginalTextBlock.Text = e.Text;
+            AppendOriginalLine(e.Text);
 
             var selectedTranslationLanguage = TranslationLanguageComboBox.SelectedItem as LanguageOption;
-            var translationLabel = selectedTranslationLanguage?.DisplayName ?? "번역";
-            TranslatedTextBlock.Text = $"{ConvertLanguageCodeToDisplayName(e.LanguageCode)} 인식 완료 / {translationLabel} 번역 대기";
+            var translationLabel = selectedTranslationLanguage?.DisplayName ?? "Translation";
+            TranslatedTextBlock.Text = $"{PendingTranslationText} ({translationLabel})";
 
-            DetailTextBlock.Text = $"인식 언어: {ConvertLanguageCodeToDisplayName(e.LanguageCode)} | 신뢰도: {e.Confidence:P0}";
+            DetailTextBlock.Text = $"Detected: {ConvertLanguageCodeToDisplayName(e.LanguageCode)} | Confidence: {e.Confidence:P0}";
             ApplyVisualState(_audioCaptureService.State, _speechRecognitionService.State);
         });
     }
@@ -217,8 +224,8 @@ public partial class MainWindow : Window
 
     private void ApplyVisualState(AudioCaptureState captureState, SpeechRecognitionState recognitionState)
     {
-        CaptureToggleButton.Content = _isCaptureEnabled ? "■" : "●";
-        CaptureToggleButton.ToolTip = _isCaptureEnabled ? "오디오 캡처 끄기" : "오디오 캡처 켜기";
+        CaptureToggleButton.Content = _isCaptureEnabled ? "||" : ">>";
+        CaptureToggleButton.ToolTip = _isCaptureEnabled ? "Stop audio capture" : "Start audio capture";
 
         CaptureEnabledIndicator.Fill = _isCaptureEnabled ? CreateBrush("#39D353") : CreateBrush("#6E6E6E");
         CaptureHealthIndicator.Fill = recognitionState switch
@@ -249,20 +256,51 @@ public partial class MainWindow : Window
     {
         return state switch
         {
-            AudioCaptureState.Starting => "기본 출력 장치에서 오디오 캡처를 시작하는 중입니다.",
-            AudioCaptureState.Capturing => $"장치: {_currentDeviceName} | 포맷: {_currentFormatDescription}",
-            AudioCaptureState.Stopping => "오디오 캡처를 중지하는 중입니다.",
-            AudioCaptureState.Faulted => "오디오 캡처 중 오류가 발생했습니다.",
-            _ => "캡처를 켜면 기본 출력 장치의 시스템 오디오를 감시합니다."
+            AudioCaptureState.Starting => "Starting loopback capture.",
+            AudioCaptureState.Capturing => $"Device: {_currentDeviceName} | Format: {_currentFormatDescription}",
+            AudioCaptureState.Stopping => "Stopping audio capture.",
+            AudioCaptureState.Faulted => "An error occurred while capturing audio.",
+            _ => "Start capture to monitor system audio."
         };
     }
 
     private string BuildStatsDetailMessage(TimeSpan duration, long totalBytesCaptured)
     {
-        return $"장치: {_currentDeviceName} | 포맷: {_currentFormatDescription} | 누적 시간: {duration:hh\\:mm\\:ss} | 수집 크기: {FormatBytes(totalBytesCaptured)} | 최근 피크: {_latestPeakPercent:0}%";
+        return $"Device: {_currentDeviceName} | Format: {_currentFormatDescription} | Duration: {duration:hh\\:mm\\:ss} | Captured: {FormatBytes(totalBytesCaptured)} | Peak: {_latestPeakPercent:0}%";
     }
 
-    private void Window_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void AppendOriginalLine(string text)
+    {
+        var normalized = text.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return;
+        }
+
+        if (_recentOriginalLines.Count > 0 && string.Equals(_recentOriginalLines.Last(), normalized, StringComparison.Ordinal))
+        {
+            OriginalTextBlock.Text = string.Join(Environment.NewLine, _recentOriginalLines);
+            return;
+        }
+
+        _recentOriginalLines.Enqueue(normalized);
+
+        while (_recentOriginalLines.Count > MaxDisplayedOriginalLines)
+        {
+            _recentOriginalLines.Dequeue();
+        }
+
+        OriginalTextBlock.Text = string.Join(Environment.NewLine, _recentOriginalLines);
+    }
+
+    private void ClearDisplayedRecognition()
+    {
+        _recentOriginalLines.Clear();
+        OriginalTextBlock.Text = OriginalPlaceholderText;
+        TranslatedTextBlock.Text = TranslatedPlaceholderText;
+    }
+
+    private void Window_OnClosing(object? sender, CancelEventArgs e)
     {
         _signalMonitorTimer.Stop();
         _signalMonitorTimer.Tick -= SignalMonitorTimer_OnTick;
@@ -279,15 +317,15 @@ public partial class MainWindow : Window
         _audioCaptureService.Dispose();
     }
 
-    private static string ConvertCaptureStateToKorean(AudioCaptureState state)
+    private static string ConvertCaptureStateToDisplayText(AudioCaptureState state)
     {
         return state switch
         {
-            AudioCaptureState.Idle => "대기 중",
-            AudioCaptureState.Starting => "캡처 시작 중",
-            AudioCaptureState.Capturing => "캡처 동작 중",
-            AudioCaptureState.Stopping => "캡처 중지 중",
-            AudioCaptureState.Faulted => "캡처 오류",
+            AudioCaptureState.Idle => "Idle",
+            AudioCaptureState.Starting => "Starting",
+            AudioCaptureState.Capturing => "Capturing",
+            AudioCaptureState.Stopping => "Stopping",
+            AudioCaptureState.Faulted => "Capture error",
             _ => state.ToString()
         };
     }
@@ -296,10 +334,10 @@ public partial class MainWindow : Window
     {
         return languageCode switch
         {
-            "en-US" => "영어",
-            "ja-JP" => "일본어",
-            "zh-CN" => "중국어",
-            "ko-KR" => "한국어",
+            "en-US" => "English",
+            "ja-JP" => "Japanese",
+            "zh-CN" => "Chinese",
+            "ko-KR" => "Korean",
             _ => languageCode
         };
     }

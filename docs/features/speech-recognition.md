@@ -1,54 +1,52 @@
-# 음성 인식 기능
+# Speech Recognition
 
-## 목적
+## Summary
 
-캡처된 시스템 오디오에서 음성을 감지하고, 이를 텍스트로 변환해 중앙 자막 영역에 표시하는 기능입니다.
+The application uses local Whisper inference through `Whisper.net`. Audio captured from the Windows output device is buffered, converted to mono `16kHz` samples, and transcribed locally.
 
-## 지원 언어
+## Current Recognition Pipeline
 
-- 영어
-- 일본어
-- 중국어
-- 한국어
+1. Audio capture emits chunks continuously.
+2. The recognition service buffers those chunks.
+3. A speech segment is flushed when silence is detected or the buffered length reaches the configured cap.
+4. The buffered audio is converted to mono `16kHz` samples.
+5. Whisper processes the samples and returns transcribed segments.
+6. The UI displays the newest recognized line while keeping the previous line visible.
 
-## 현재 구현 내용
+## Balanced Profile
 
-- `Whisper.net` 기반 로컬 Whisper 엔진 사용
-- 앱 시작 후 필요 시 기본 Whisper 모델 자동 다운로드
-- 인식 언어 선택 콤보박스 제공
-- 번역 언어 선택 콤보박스 제공
-- 오디오 캡처 청크를 누적한 뒤, 간단한 무음 구간 기준으로 발화 단위 인식 수행
-- 입력 오디오를 `16kHz mono PCM`으로 변환한 뒤 Whisper에 전달
-- 인식 결과를 중앙 자막 영역의 원문 줄에 표시
-- 두 번째 줄에는 현재 인식된 언어를 표시
+The current profile is intentionally balanced between latency and readability:
 
-## 관련 파일
+- Signal threshold: `3%`
+- Silence timeout: `700ms`
+- Minimum speech length: `550ms`
+- Maximum speech length: `5.5s`
 
-- `LiveAudioTranslator.App/Services/SpeechRecognition/ISpeechRecognitionService.cs`
+This is slower than an aggressive low-latency setup, but it reduces premature sentence splitting and helps preserve recognition quality.
+
+## Performance Improvements Already Applied
+
+- Whisper processor reuse
+- Explicit thread selection
+- Direct `float[]` sample feeding
+- Avoiding repeated WAV serialization
+
+## User-Facing Behavior
+
+- Recognition language can be selected from the UI
+- The original text area shows the latest two recognized lines
+- Duplicate consecutive recognition results are suppressed
+- Translation output is still placeholder-only
+
+## Known Limits
+
+- CPU performance has a strong effect on latency
+- Background music or noisy mixed audio reduces accuracy
+- There is no VAD model yet; segmentation still relies on simple signal and silence timing
+- There is no true translation backend yet
+
+## Related Files
+
 - `LiveAudioTranslator.App/Services/SpeechRecognition/LocalWhisperSpeechRecognitionService.cs`
-- `LiveAudioTranslator.App/Services/SpeechRecognition/SpeechRecognitionState.cs`
-- `LiveAudioTranslator.App/Services/SpeechRecognition/SpeechRecognitionStateChangedEventArgs.cs`
 - `LiveAudioTranslator.App/Services/SpeechRecognition/RecognizedSpeechEventArgs.cs`
-- `LiveAudioTranslator.App/Services/AudioCapture/AudioChunkAvailableEventArgs.cs`
-- `LiveAudioTranslator.App/MainWindow.xaml`
 - `LiveAudioTranslator.App/MainWindow.xaml.cs`
-
-## 동작 방식
-
-1. 캡처 서비스가 원시 오디오 청크를 전달합니다.
-2. 음성 인식 서비스가 청크를 버퍼에 누적합니다.
-3. 일정 시간 무음이 이어지면 하나의 발화로 간주합니다.
-4. 오디오를 인식용 16kHz mono PCM 형식으로 변환합니다.
-5. 선택된 인식 언어에 맞춰 로컬 Whisper 처리기를 생성합니다.
-6. 인식 결과를 UI에 표시합니다.
-
-## 전제 조건
-
-- 앱 실행 중 기본 Whisper 모델을 내려받을 수 있어야 하거나, 미리 `%LOCALAPPDATA%\LiveAudioTranslator\models\ggml-base.bin` 파일이 준비되어 있어야 합니다.
-- Windows에서 Whisper 런타임을 사용할 수 있는 환경이어야 합니다.
-
-## 현재 한계
-
-- 번역 기능은 아직 연결되지 않았습니다.
-- 단순 무음 기준 분리이므로 긴 문장에서는 분리 품질이 떨어질 수 있습니다.
-- 배경음악이 큰 환경에서는 인식 정확도가 떨어질 수 있습니다.

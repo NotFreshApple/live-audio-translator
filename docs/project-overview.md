@@ -1,32 +1,49 @@
-# 프로젝트 개요
+# Project Overview
 
-## 목표
+## Goal
 
-PC에서 출력되는 소리와 음성을 읽어 텍스트로 변환하고, 이를 한국어로 번역한 뒤 화면 하단 자막 형태로 보여주는 Windows 프로그램을 만드는 것이 목표입니다.
+This project aims to show recognized speech from Windows system audio in a persistent bottom overlay. The long-term goal is live translation, but the current implementation focuses on reliable local audio capture and local speech recognition.
 
-## 현재 진행 상태
+## Current Architecture
 
-- WPF 기반 데스크톱 프로젝트 생성 완료
-- VS2022 빌드 가능 여부 확인 완료
-- Windows 시스템 오디오 루프백 캡처 구현 완료
-- 하단 오버레이 형태의 기본 실행 화면 구현 완료
-- 일본어/한국어 음성 인식 기능 구현 완료
+- UI: WPF overlay window
+- Audio input: `NAudio` with `WASAPI loopback`
+- Speech recognition: `Whisper.net`
+- Target framework: `net9.0-windows`
+- IDE target: Visual Studio 2022
 
-## 현재 화면 구성
+## Main User Flow
 
-- 모니터 하단에 반투명 검은색 박스 표시
-- 좌측에 오디오 캡처 켜기/끄기 버튼
-- 인식 언어 선택 콤보박스
-- 인식 언어팩 설치 상태 버튼
-- 번역 언어 선택 콤보박스
-- 번역 언어팩 설치 상태 버튼
-- 상태 인디케이터 3개
-- 중앙에 원문 1줄, 번역문 1줄로 표시할 자막 영역 배치
-- 하단에 현재 상태와 캡처 정보 표시
-- 우측 상단에 종료 버튼
+1. Start capture from the overlay UI.
+2. Capture system audio from the default Windows output device.
+3. Buffer audio until a speech segment is ready.
+4. Convert audio to Whisper-friendly mono `16kHz` samples.
+5. Run local Whisper inference.
+6. Show recognized text in the original-text area.
 
-## 다음 단계
+## Current UX Behavior
 
-1. 캡처 오디오를 버퍼에 쌓기
-2. 한국어 번역 연결하기
-3. 실제 자막 텍스트 출력 연결하기
+- The overlay sits near the bottom of the screen.
+- The original text area keeps the latest two recognized lines.
+- The translation area is still placeholder-only.
+- Capture state, recognition state, and live signal state are shown through indicators.
+
+## Current Limitations
+
+- No real translation engine is connected yet.
+- Audio capture uses the default output device only.
+- Recognition still depends heavily on CPU performance.
+- Background music and mixed audio can reduce accuracy.
+
+## Important Files
+
+- `LiveAudioTranslator.App/MainWindow.xaml`
+- `LiveAudioTranslator.App/MainWindow.xaml.cs`
+- `LiveAudioTranslator.App/Services/AudioCapture/WasapiLoopbackAudioCaptureService.cs`
+- `LiveAudioTranslator.App/Services/SpeechRecognition/LocalWhisperSpeechRecognitionService.cs`
+
+## Verified Build
+
+```powershell
+dotnet build .\LiveAudioTranslator.sln
+```

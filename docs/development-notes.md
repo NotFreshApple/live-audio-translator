@@ -1,32 +1,39 @@
-# 개발 기록
+# Development Notes
 
-## 2026-03-25
+## 2026-03-26
 
-### 추가된 내용
+### Environment preparation
 
-- WPF 솔루션 및 애플리케이션 프로젝트 생성
-- `NAudio` 패키지 의존성 추가
-- `System.Speech` 패키지 의존성 추가
-- 루프백 오디오 캡처 서비스 구현
-- 메인 창의 시작/중지 제어 추가
-- 장치, 포맷, 실시간 입력 레벨 표시 추가
-- 누적 캡처 시간, 누적 수집 크기, 최근 신호 감지 시각 표시 추가
-- 일본어/한국어 음성 인식 서비스 추가
-- 음성 인식 결과를 중앙 2줄 자막 UI에 연결
-- 인식 언어/번역 언어 콤보박스 추가
-- 언어팩 설치 여부 확인 및 설치 유도 기능 추가
-- 콤보박스 선택 즉시 설치하던 흐름 제거
-- 언어팩 설치 버튼 기반 흐름으로 UX 변경
-- 설치 기준을 언어팩 존재 여부에서 실제 음성 인식기 사용 가능 여부로 수정
-- 직접 설치 버튼을 제거하고 Windows `언어 및 지역` 설정을 여는 버튼으로 변경
+- Installed Git and GitHub CLI on the development machine
+- Logged into GitHub and configured global Git settings
+- Created a stable local workspace under `C:\Users\wotkd\code`
+- Installed `.NET 9 SDK`
+- Verified that the solution builds successfully on this machine
 
-### 설계 이유
+### Speech recognition performance changes
 
-- 오디오 캡처는 전체 자막 파이프라인의 첫 번째 핵심 의존성입니다.
-- 전용 서비스로 분리하면 UI 코드와 캡처 로직을 분리할 수 있습니다.
-- 이벤트 기반 구조는 이후 STT와 번역 기능을 연결하기 쉽게 만듭니다.
-- Windows 기본 음성 인식기를 활용하면 별도 서버 없이 로컬에서 빠르게 기능을 검증할 수 있습니다.
+- Moved away from WAV byte serialization during recognition
+- Converted audio directly to `float[]` samples for Whisper
+- Reused the Whisper processor instead of rebuilding it for each recognition pass
+- Set Whisper thread usage dynamically from available CPU cores
 
-### 검증
+### Recognition profile update
 
-- `dotnet build .\LiveAudioTranslator.sln`
+- Tested a more aggressive low-latency configuration
+- Switched to a balanced profile after review to avoid cutting speech too early
+- Current tuned values:
+  - `SilenceTimeout = 700ms`
+  - `MinimumSpeechLength = 550ms`
+  - `MaximumSpeechLength = 5.5s`
+
+### UI update
+
+- Rebuilt `MainWindow.xaml.cs` into a readable clean state because the previous file had corrupted display strings
+- Changed the original-text area to keep the latest two recognized lines
+- Left translated output as a placeholder because translation is not implemented yet
+
+### Verification
+
+```powershell
+dotnet build .\LiveAudioTranslator.sln -c Debug
+```

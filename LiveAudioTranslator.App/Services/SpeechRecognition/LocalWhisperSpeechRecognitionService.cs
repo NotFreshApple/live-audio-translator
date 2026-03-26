@@ -10,9 +10,11 @@ namespace LiveAudioTranslator.App.Services.SpeechRecognition;
 public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionService
 {
     private const float SignalThresholdPercent = 3f;
-    private static readonly TimeSpan SilenceTimeout = TimeSpan.FromMilliseconds(1200);
-    private static readonly TimeSpan MinimumSpeechLength = TimeSpan.FromMilliseconds(900);
-    private static readonly TimeSpan MaximumSpeechLength = TimeSpan.FromSeconds(8);
+    private const int RecognitionSampleRate = 16000;
+    private const int MaxThreads = 8;
+    private static readonly TimeSpan SilenceTimeout = TimeSpan.FromMilliseconds(700);
+    private static readonly TimeSpan MinimumSpeechLength = TimeSpan.FromMilliseconds(550);
+    private static readonly TimeSpan MaximumSpeechLength = TimeSpan.FromMilliseconds(5500);
 
     private readonly object _syncRoot = new();
     private readonly SemaphoreSlim _modelSetupLock = new(1, 1);
@@ -20,6 +22,8 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
     private string _lastRecognizedText = string.Empty;
     private WaveFormat? _sourceWaveFormat;
     private WhisperFactory? _whisperFactory;
+    private WhisperProcessor? _whisperProcessor;
+    private string? _processorLanguageCode;
     private DateTime? _lastSignalAt;
     private bool _isStarted;
     private bool _isProcessing;
@@ -72,6 +76,7 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
         lock (_syncRoot)
         {
             _selectedLanguageCode = languageCode;
+            _processorLanguageCode = null;
             _audioBuffer.SetLength(0);
             _lastSignalAt = null;
             _lastRecognizedText = string.Empty;
@@ -136,6 +141,9 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
             _isStarted = false;
             _isProcessing = false;
             _isModelReady = false;
+            DisposeProcessor(_whisperProcessor);
+            _whisperProcessor = null;
+            _processorLanguageCode = null;
             _whisperFactory?.Dispose();
             _whisperFactory = null;
             _audioBuffer.Dispose();
@@ -188,6 +196,9 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
 
             lock (_syncRoot)
             {
+                DisposeProcessor(_whisperProcessor);
+                _whisperProcessor = null;
+                _processorLanguageCode = null;
                 _whisperFactory?.Dispose();
                 _whisperFactory = factory;
                 _isModelReady = true;
@@ -212,8 +223,8 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
     {
         try
         {
-            var wavBytes = ConvertToRecognitionWave(rawAudioBytes, sourceFormat);
-            var recognized = await RecognizeAsync(wavBytes, selectedLanguageCode);
+            var samples = ConvertToRecognitionSamples(rawAudioBytes, sourceFormat);
+            var recognized = await RecognizeAsync(samples, selectedLanguageCode);
 
             lock (_syncRoot)
             {
@@ -246,32 +257,26 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
         }
     }
 
-    private async Task<RecognizedSpeechEventArgs?> RecognizeAsync(byte[] wavBytes, string? selectedLanguageCode)
+    private async Task<RecognizedSpeechEventArgs?> RecognizeAsync(float[] samples, string? selectedLanguageCode)
     {
-        WhisperFactory? factory;
+        WhisperProcessor? processor;
 
         lock (_syncRoot)
         {
-            factory = _whisperFactory;
+            processor = GetOrCreateProcessor_NoLock(selectedLanguageCode);
         }
 
-        if (factory is null)
+        if (processor is null || samples.Length == 0)
         {
             return null;
         }
-
-        await using var processor = factory.CreateBuilder()
-            .WithLanguage(MapToWhisperLanguageCode(selectedLanguageCode))
-            .Build();
-
-        await using var audioStream = new MemoryStream(wavBytes, writable: false);
 
         var textParts = new List<string>();
         var probabilityTotal = 0f;
         var segmentCount = 0;
         var detectedLanguage = selectedLanguageCode ?? "ko-KR";
 
-        await foreach (var segment in processor.ProcessAsync(audioStream))
+        await foreach (var segment in processor.ProcessAsync(samples))
         {
             if (string.IsNullOrWhiteSpace(segment.Text))
             {
@@ -298,7 +303,41 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
         return new RecognizedSpeechEventArgs(combinedText, detectedLanguage, confidence);
     }
 
-    private static byte[] ConvertToRecognitionWave(byte[] rawAudioBytes, WaveFormat sourceFormat)
+    private WhisperProcessor? GetOrCreateProcessor_NoLock(string? selectedLanguageCode)
+    {
+        if (_whisperFactory is null)
+        {
+            return null;
+        }
+
+        var whisperLanguageCode = MapToWhisperLanguageCode(selectedLanguageCode);
+        if (_whisperProcessor is not null && string.Equals(_processorLanguageCode, whisperLanguageCode, StringComparison.Ordinal))
+        {
+            return _whisperProcessor;
+        }
+
+        DisposeProcessor(_whisperProcessor);
+
+        var threadCount = Math.Clamp(Environment.ProcessorCount, 2, MaxThreads);
+        var builder = _whisperFactory.CreateBuilder()
+            .WithThreads(threadCount)
+            .WithMaxSegmentLength(180);
+
+        if (string.Equals(whisperLanguageCode, "auto", StringComparison.Ordinal))
+        {
+            builder.WithLanguageDetection();
+        }
+        else
+        {
+            builder.WithLanguage(whisperLanguageCode);
+        }
+
+        _whisperProcessor = builder.Build();
+        _processorLanguageCode = whisperLanguageCode;
+        return _whisperProcessor;
+    }
+
+    private static float[] ConvertToRecognitionSamples(byte[] rawAudioBytes, WaveFormat sourceFormat)
     {
         using var sourceStream = new RawSourceWaveStream(new MemoryStream(rawAudioBytes, writable: false), sourceFormat);
         ISampleProvider sampleProvider = sourceStream.ToSampleProvider();
@@ -308,15 +347,50 @@ public sealed class LocalWhisperSpeechRecognitionService : ISpeechRecognitionSer
             sampleProvider = new StereoToMonoSampleProvider(sampleProvider);
         }
 
-        if (sampleProvider.WaveFormat.SampleRate != 16000)
+        if (sampleProvider.WaveFormat.SampleRate != RecognitionSampleRate)
         {
-            sampleProvider = new WdlResamplingSampleProvider(sampleProvider, 16000);
+            sampleProvider = new WdlResamplingSampleProvider(sampleProvider, RecognitionSampleRate);
         }
 
-        var waveProvider = new SampleToWaveProvider16(sampleProvider);
-        using var outputStream = new MemoryStream();
-        WaveFileWriter.WriteWavFileToStream(outputStream, waveProvider);
-        return outputStream.ToArray();
+        var estimatedSamples = Math.Max(
+            RecognitionSampleRate / 2,
+            (int)Math.Ceiling(GetBufferedDuration(rawAudioBytes.Length, sourceFormat).TotalSeconds * RecognitionSampleRate));
+
+        var samples = new float[estimatedSamples];
+        var readBuffer = new float[4096];
+        var totalSamples = 0;
+
+        while (true)
+        {
+            var samplesRead = sampleProvider.Read(readBuffer, 0, readBuffer.Length);
+            if (samplesRead <= 0)
+            {
+                break;
+            }
+
+            if (totalSamples + samplesRead > samples.Length)
+            {
+                Array.Resize(ref samples, Math.Max(samples.Length * 2, totalSamples + samplesRead));
+            }
+
+            Array.Copy(readBuffer, 0, samples, totalSamples, samplesRead);
+            totalSamples += samplesRead;
+        }
+
+        if (totalSamples != samples.Length)
+        {
+            Array.Resize(ref samples, totalSamples);
+        }
+
+        return samples;
+    }
+
+    private static void DisposeProcessor(WhisperProcessor? processor)
+    {
+        if (processor is IAsyncDisposable asyncDisposable)
+        {
+            asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     private string BuildReadyMessage()
